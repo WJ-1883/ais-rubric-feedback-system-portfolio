@@ -1,0 +1,482 @@
+﻿@using AIS_RubricFeedbackGenerator.Models
+@model AIS_RubricFeedbackGenerator.Models.MarkingPageViewModel
+
+@{
+    ViewData["Title"] = "Mark Student Work";
+}
+
+@if (TempData["Success"] != null)
+{
+    <div class="alert alert-success alert-dismissible fade show" role="alert">
+        @TempData["Success"]
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+}
+
+<div class="mb-3">
+    <a asp-action="Students" asp-controller="Marking" asp-route-assignmentId="@Model.Assignment.AssignmentId" class="btn btn-outline-secondary">
+        ← Back to Student List
+    </a>
+</div>
+
+<div class="row">
+    <div class="col-12">
+        <h2>Mark Student Work</h2>
+
+        <!-- Student & Assessment Info -->
+        <div class="mb-3">
+            <div class="row mb-2">
+                <div class="col-md-12"><strong>Course:</strong> @Model.Assignment.Course.CourseName</div>
+            </div>
+            <div class="row mb-2">
+                <div class="col-md-12"><strong>Assessment:</strong> @Model.Assignment.AssignmentName</div>
+            </div>
+            <div class="row mb-2">
+                <div class="col-md-12"><strong>Student ID:</strong> @Model.Student.StudentId</div>
+            </div>
+            <div class="row mb-4">
+                <div class="col-md-12"><strong>Student Name:</strong> @Model.Student.FullName</div>
+            </div>
+        </div>
+
+        @{
+            bool isSubmitted = Model.MarkingHeader?.MarkingStatus == "submitted";
+        }
+
+        @if (isSubmitted)
+        {
+            <div class="mb-3">
+                <form asp-action="ResetMarking" asp-controller="Marking" method="post" class="d-inline">
+                    <input type="hidden" name="assignmentId" value="@Model.Assignment.AssignmentId" />
+                    <input type="hidden" name="studentId" value="@Model.Student.StudentId" />
+                    <button type="submit" class="btn btn-warning"
+                            onclick="return confirm('Are you sure you want to reset the marking progress? This will clear all scores.')">
+                        Remark
+                    </button>
+                </form>
+
+                <a asp-action="GenerateReport" asp-controller="Marking"
+                   asp-route-assignmentId="@Model.Assignment.AssignmentId"
+                   asp-route-studentId="@Model.Student.StudentId"
+                   class="btn btn-success" target="_blank">
+                    📄 Generate PDF Report
+                </a>
+            </div>
+        }
+
+        <div id="floatingScoreBox">
+            <strong>Total Score:</strong> <span id="totalScoreFloating">0</span> /
+            <span id="maxPossibleScoreFloating">0</span>
+        </div>
+
+
+        <form asp-action="SaveMarking" asp-controller="Marking" method="post">
+            <input type="hidden" name="AssignmentId" value="@Model.Assignment.AssignmentId" />
+            <input type="hidden" name="StudentId" value="@Model.Student.StudentId" />
+
+            <div class="mt-3 d-flex flex-wrap gap-2">
+                <button type="submit" name="action" value="save" class="btn btn-secondary" @(isSubmitted ? "disabled" : "")>Save</button>
+                <button type="submit" name="action" value="submit" class="btn btn-primary" @(isSubmitted ? "disabled" : "")>Submit</button>
+            </div>
+
+
+            <!-- Tasks and Rubrics -->
+            @foreach (var task in Model.Assignment.Tasks)
+            {
+                <h4 class="mt-4 text-secondary fw-bold">@task.SortOrder. @task.Title</h4>
+                @Html.Raw(task.Description)
+                @foreach (var rubric in task.Rubrics)
+                {
+                    <fieldset class="mb-4">
+                        <legend>@rubric.SortOrder. @rubric.Question</legend>
+                        <div class="table-responsive">
+                            <table class="table table-bordered text-center align-middle">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th style="width:20%">Criteria</th>
+                                        @{
+                                            var scoreDefs = (rubric.ScoreDefinitions ?? new List<ScoreDefinition>())
+                                            .OrderByDescending(sd => sd.ScoreValue)
+                                            .ToList();
+
+
+                                        }
+                                        @foreach (var scoreDef in scoreDefs)
+                                        {
+                                            <th>
+                                                <div class="fw-bold">@scoreDef.ScoreValue</div>
+                                                <div>@scoreDef.ScoreName</div>
+                                            </th>
+                                        }
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var criterion in rubric.Criteria)
+                                    {
+                                        <tr>
+                                            <td>@criterion.Title</td>
+                                            @foreach (var scoreDef in scoreDefs)
+                                            {
+                                                var scoreLevel = (Model.ScoreLevels ?? new List<ScoreLevel>())
+                                                .FirstOrDefault(sl => sl.CriterionId == criterion.CriterionId && sl.ScoreDefinitionId == scoreDef.ScoreDefinitionId);
+                                                // Check if this score was previously selected
+                                                var isSelected = Model.MarkingHeader?.MarkingDetails != null &&
+                                                Model.MarkingHeader.MarkingDetails
+                                                .Any(md => md.CriterionId == criterion.CriterionId && md.ScoreDefinitionId == scoreDef.ScoreDefinitionId);
+
+                                                <td class="selectable-cell @(isSelected ? "selected" : "")"
+                                                    data-criterion-id="@criterion.CriterionId"
+                                                    data-scoredef-id="@scoreDef.ScoreDefinitionId">
+                                                    @scoreLevel?.Description <!-- or show description instead -->
+                                                </td>
+                                            }
+
+
+                                        </tr>
+                                        <!-- Hidden input to store the selection -->
+                                        <input type="hidden" name="SelectedScores[@criterion.CriterionId]" value="@(Model.MarkingHeader?.MarkingDetails?.FirstOrDefault(md => md.CriterionId == criterion.CriterionId)?.ScoreDefinitionId ?? "")" />
+                                    }
+                                </tbody>
+
+
+                            </table>
+                        </div>
+                    </fieldset>
+                }
+            }
+
+        </form>
+
+    </div>
+</div>
+
+<div id="floatingScore" class="floating-score shadow">
+    <div class="floating-score__label">Total</div>
+    <div class="floating-score__value"><span id="totalScore">0</span> / <span id="maxPossibleScore">0</span></div>
+</div>
+
+<button id="backToTopBtn" class="btn btn-primary rounded-circle shadow"
+        style="position: fixed; bottom: 40px; right: 40px; display: none; width: 50px; height: 50px;">
+    ↑
+</button>
+
+
+@* 
+<div class="text-center">
+    <h2>n8n Webhook Test Trigger</h2>
+    <p>This button sends the hardcoded payload to your n8n workflow.</p>
+
+    <div class="form-group mb-4">
+        <label for="testIdInput">Test ID for C# Method:</label>
+        <input type="number" id="testIdInput" value="101" class="form-control d-inline-block w-auto" />
+        <small class="form-text text-muted">This value is currently unused in the payload but required by the C# method signature.</small>
+    </div>
+
+    <button id="triggerButton" class="btn btn-primary btn-lg">🚀 Trigger n8n Webhook</button>
+
+    <hr />
+
+    <h4>Result:</h4>
+    <pre id="resultOutput" class="alert alert-light text-left">Waiting for trigger...</pre>
+</div>
+ *@
+@section Scripts {
+    <script>
+        $(document).ready(function () {
+            $('#triggerButton').on('click', function () {
+                var $button = $(this);
+                var $output = $('#resultOutput');
+
+                $button.prop('disabled', true).text('Sending...');
+                $output.removeClass('alert-success alert-danger alert-light').addClass('alert-warning').text('Sending webhook...');
+
+                var url = '@Url.Action("TriggerN8NWorkflow", "Marking")';
+
+                // Pass the assignmentId and studentId that the controller expects
+                var data = {
+                    assignmentId: '@Model.Assignment.AssignmentId',
+                    studentId: '@Model.Student.StudentId'
+                };
+
+                $.ajax({
+                    type: "POST",
+                    url: url,
+                    data: data,
+                    success: function (response) {
+                        var formattedResponse = (typeof response === 'string' ? response : JSON.stringify(response))
+                            .replace(/\\n/g, '<br>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\*/g, '•');
+
+                        $output.removeClass('alert-warning').addClass('alert-success').html("<strong>SUCCESS!</strong><br>" + formattedResponse);
+                    },
+                    error: function (xhr) {
+                        var status = xhr.status;
+                        var errorMessage = xhr.responseText || 'An unknown error occurred.';
+                        $output.removeClass('alert-warning').addClass('alert-danger').html("<strong>ERROR! (HTTP " + status + ")</strong><br>" + errorMessage);
+                    },
+                    complete: function () {
+                        $button.prop('disabled', false).text('🚀 Trigger n8n Webhook');
+                    }
+                });
+            });
+        });
+    </script>
+}
+
+
+<style>
+    .card {
+        border-radius: 12px;
+    }
+
+    table th, table td {
+        vertical-align: middle;
+    }
+
+    fieldset {
+        border: 1px solid #dee2e6;
+        padding: 1rem;
+        border-radius: 0.5rem;
+    }
+
+    legend {
+        width: auto;
+        padding: 0 0.5rem;
+        font-size: 1.1rem;
+    }
+
+    .selectable-cell {
+        cursor: pointer;
+        transition: background-color 0.3s ease;
+    }
+
+        .selectable-cell.selected {
+            background-color: #c0f0f0 !important;
+            border: 2px solid #00aaff;
+        }
+
+    .floating-score {
+        position: fixed;
+        bottom: 110px;
+        right: 40px;
+        background-color: rgba(13, 110, 253, 0.9);
+        color: #fff;
+        padding: 0.55rem 0.9rem;
+        border-radius: 999px;
+        display: flex;
+        align-items: center;
+        gap: 0.35rem;
+        font-size: 0.95rem;
+        line-height: 1.2;
+        min-width: 160px;
+        justify-content: center;
+        box-shadow: 0 0.35rem 0.9rem rgba(13, 110, 253, 0.3);
+        z-index: 1030;
+    }
+
+    .floating-score__label {
+        font-size: 0.8rem;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        opacity: 0.8;
+    }
+
+    .floating-score__value {
+        font-size: 1.1rem;
+        font-weight: 600;
+    }
+
+    @@media (max-width: 767.98px) {
+        .floating-score {
+            left: 50%;
+            right: auto;
+            bottom: 90px;
+            transform: translateX(-50%);
+            width: auto;
+            max-width: calc(100% - 2.5rem);
+            border-radius: 999px;
+        }
+
+        #floatingScoreBox {
+            display: none;
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: white;
+            padding: 12px 18px;
+            border-radius: 10px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            z-index: 9999;
+            font-size: 1rem;
+            font-weight: 600;
+            border: 1px solid #ddd;
+        }
+
+</style>
+
+<script>
+
+    // JS object mapping ScoreDefinitionId → numeric value
+    const scoreValueMap = {
+        @foreach (var task in Model.Assignment.Tasks)
+        {
+                    foreach (var rubric in task.Rubrics)
+                    {
+                                foreach (var scoreDef in rubric.ScoreDefinitions)
+                                {
+                                            <text>"@scoreDef.ScoreDefinitionId": @scoreDef.ScoreValue.ToString().Replace(',','.'),</text>
+                                }
+                    }
+        }
+    };
+    document.addEventListener("DOMContentLoaded", function () {
+        const isSubmitted = @Json.Serialize(isSubmitted);
+
+            function updateTotalScore() {
+        let total = 0;
+    document.querySelectorAll(".selectable-cell.selected").forEach(cell => {
+        const scoreDefId = cell.dataset.scoredefId;
+        const scoreValue = parseFloat(scoreValueMap[scoreDefId]) || 0;
+        total += scoreValue;
+    });
+
+    // Existing bottom score
+    const totalEl = document.getElementById("totalScore");
+    if (totalEl) totalEl.textContent = total.toFixed(2);
+
+    // NEW floating score
+    const floatEl = document.getElementById("totalScoreFloating");
+    if (floatEl) floatEl.textContent = total.toFixed(2);
+    }
+
+    function calculateMaxPossibleScore() {
+        let maxPossible = 0;
+
+    const criterionIds = new Set();
+    document.querySelectorAll(".selectable-cell").forEach(cell => {
+        criterionIds.add(cell.dataset.criterionId);
+    });
+
+    criterionIds.forEach(criterionId => {
+        const cellsForCriterion = document.querySelectorAll(`.selectable-cell[data-criterion-id='${criterionId}']`);
+        let maxScoreForCriterion = 0;
+
+        cellsForCriterion.forEach(cell => {
+            const scoreDefId = cell.dataset.scoredefId;
+            const scoreValue = parseFloat(scoreValueMap[scoreDefId]) || 0;
+            if (scoreValue > maxScoreForCriterion) {
+                maxScoreForCriterion = scoreValue;
+            }
+        });
+
+        maxPossible += maxScoreForCriterion;
+    });
+
+    // Existing bottom score
+    const maxPossibleEl = document.getElementById("maxPossibleScore");
+    if (maxPossibleEl) maxPossibleEl.textContent = maxPossible.toFixed(2);
+
+    // NEW floating score
+    const maxFloatEl = document.getElementById("maxPossibleScoreFloating");
+    if (maxFloatEl) maxFloatEl.textContent = maxPossible.toFixed(2);
+    }
+
+        // --- Handle score cell selection (only if not submitted) ---
+        if (!isSubmitted) {
+            document.querySelectorAll(".selectable-cell").forEach(cell => {
+                cell.addEventListener("click", function () {
+                    const criterionId = this.dataset.criterionId;
+
+                    // Clear others for same criterion
+                    document.querySelectorAll(`.selectable-cell[data-criterion-id='${criterionId}']`)
+                        .forEach(c => c.classList.remove("selected"));
+
+                    this.classList.add("selected");
+
+                    const hiddenInput = document.querySelector(`input[name='SelectedScores[${criterionId}]']`);
+                    if (hiddenInput) {
+                        hiddenInput.value = this.dataset.scoredefId;
+                    }
+
+                    // Update total
+                         updateTotalScore();
+                });
+            });
+        }
+
+             // --- Calculate total for preselected cells (on load) ---
+                updateTotalScore();
+                calculateMaxPossibleScore();
+
+            // --- Handle Save/Submit confirmation once ---
+    document.querySelectorAll("button[type='submit'][name='action']").forEach(btn => {
+        btn.addEventListener("click", function (e) {
+            const action = this.value;
+
+            // Only validate before submitting
+            if (action === "submit") {
+                // Get all hidden inputs for scores
+                const scoreInputs = document.querySelectorAll("input[name^='SelectedScores']");
+                let allFilled = true;
+
+                scoreInputs.forEach(input => {
+                    if (!input.value || input.value.trim() === "") {
+                        allFilled = false;
+                    }
+                });
+
+                if (!allFilled) {
+                    alert("⚠️ Please mark all criteria before submitting.");
+                    e.preventDefault();
+                    return;
+                }
+            }
+
+            // Confirmation prompt
+            const message = action === "save"
+                ? "Do you want to save your current progress without submitting?"
+                : "Are you sure you want to submit the marks? You may not be able to change them later.";
+
+            if (!confirm(message)) {
+                e.preventDefault();
+            }
+        });
+    });
+
+        // --- Smooth scroll to top ---
+        const backBtn = document.getElementById("backToTopBtn");
+        if (backBtn) {
+            backBtn.addEventListener("click", () => {
+                window.scrollTo({ top: 0, behavior: "smooth" });
+            });
+
+            window.addEventListener("scroll", () => {
+                backBtn.style.display = document.documentElement.scrollTop > 300 ? "block" : "none";
+            });
+
+                // Show floating score when scrolling down
+    window.addEventListener("scroll", () => {
+        const box = document.getElementById("floatingScoreBox");
+        if (!box) return;
+
+        box.style.display = document.documentElement.scrollTop > 300 ? "block" : "none";
+    });
+
+        }
+
+        // --- Prevent multiple reset clicks ---
+        const resetForm = document.querySelector("form[asp-action='ResetMarking']");
+        if (resetForm) {
+            resetForm.addEventListener("submit", function () {
+                const btn = resetForm.querySelector("button[type='submit']");
+                if (btn) {
+                    btn.disabled = true;
+                    btn.innerText = "Resetting...";
+                }
+            });
+        }
+    });
+</script>
+
+
+
+
